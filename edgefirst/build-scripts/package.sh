@@ -62,20 +62,38 @@ cp "$REPO_ROOT/LICENSE" "$STAGE_DIR/"
 cp "$REPO_ROOT/ThirdPartyNotices.txt" "$STAGE_DIR/" 2>/dev/null || true
 
 # --- BUILD_INFO.txt provenance ----------------------------------------------
-# Each provenance probe is wrapped to never fail the build: a missing tool
-# yields "unknown" rather than aborting under set -euo pipefail.
+# Each probe is wrapped to never fail the build: a missing tool yields
+# "unknown" rather than aborting under set -euo pipefail.
 NVCC_BIN="$(command -v nvcc 2>/dev/null || echo /usr/local/cuda/bin/nvcc)"
+
+# L4T: format "R<major>.<revision>" by joining "R36" and "4.7" from
+# /etc/nv_tegra_release (avoids the brittle field-by-position approach).
+L4T_MAJOR="$(grep -oE '^# R[0-9]+' /etc/nv_tegra_release 2>/dev/null | head -1 | sed 's/^# R//' || true)"
+L4T_REV="$(grep -oE 'REVISION: [0-9.]+' /etc/nv_tegra_release 2>/dev/null | head -1 | sed 's/REVISION: //' || true)"
+L4T_LINE="R${L4T_MAJOR:-?}.${L4T_REV:-?}"
+
+# CUDA: extract just "12.6.68" from the "V12.6.68" tag in nvcc --version.
+CUDA_LINE="$( "$NVCC_BIN" --version 2>/dev/null | grep -oE 'V[0-9]+\.[0-9]+\.[0-9]+' | head -1 | sed 's/^V//' || true)"
+CUDA_LINE="${CUDA_LINE:-unknown}"
+
+# CMake: prefer the cmake actually used by the build (CMakeCache.txt records
+# its absolute path), so BUILD_INFO matches build-time even if the script is
+# re-run outside the venv.
+CMAKE_FROM_BUILD="$(grep '^CMAKE_COMMAND:' "$BUILD_DIR/CMakeCache.txt" 2>/dev/null | cut -d= -f2- || true)"
+if [ -n "$CMAKE_FROM_BUILD" ] && [ -x "$CMAKE_FROM_BUILD" ]; then
+    CMAKE_LINE="$("$CMAKE_FROM_BUILD" --version 2>/dev/null | head -1)"
+else
+    CMAKE_LINE="$(cmake --version 2>/dev/null | head -1 || echo unknown)"
+fi
+
 JETPACK_LINE="$(dpkg-query -W -f='${Version}\n' nvidia-jetpack 2>/dev/null \
     || dpkg-query -W -f='${Version}\n' nvidia-l4t-core 2>/dev/null \
     || echo unknown)"
-L4T_LINE="$( { awk -F'[ ,]+' '/R[0-9]+ \(release\)/{print $2" "$4}' /etc/nv_tegra_release 2>/dev/null | head -1; } || echo unknown)"
-CUDA_LINE="$( { "$NVCC_BIN" --version 2>/dev/null | awk '/release/{print $5" "$6}' | tr -d ','; } || echo unknown)"
 CUDNN_LINE="$(dpkg-query -W -f='${Version}\n' libcudnn9-cuda-12 2>/dev/null || echo unknown)"
 HW_LINE="$(tr -d '\0' < /proc/device-tree/model 2>/dev/null || echo unknown)"
 GIT_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
 GIT_DESC="$(git -C "$REPO_ROOT" describe --always --dirty 2>/dev/null || echo unknown)"
 GCC_LINE="$(g++ --version 2>/dev/null | head -1 || echo unknown)"
-CMAKE_LINE="$(cmake --version 2>/dev/null | head -1 || echo unknown)"
 BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 cat > "$STAGE_DIR/BUILD_INFO.txt" <<INFO
