@@ -62,15 +62,20 @@ cp "$REPO_ROOT/LICENSE" "$STAGE_DIR/"
 cp "$REPO_ROOT/ThirdPartyNotices.txt" "$STAGE_DIR/" 2>/dev/null || true
 
 # --- BUILD_INFO.txt provenance ----------------------------------------------
+# Each provenance probe is wrapped to never fail the build: a missing tool
+# yields "unknown" rather than aborting under set -euo pipefail.
+NVCC_BIN="$(command -v nvcc 2>/dev/null || echo /usr/local/cuda/bin/nvcc)"
 JETPACK_LINE="$(dpkg-query -W -f='${Version}\n' nvidia-jetpack 2>/dev/null \
     || dpkg-query -W -f='${Version}\n' nvidia-l4t-core 2>/dev/null \
     || echo unknown)"
-L4T_LINE="$(awk -F'[ ,]+' '/R[0-9]+ \(release\)/{print $2" "$4}' /etc/nv_tegra_release 2>/dev/null | head -1)"
-CUDA_LINE="$(nvcc --version 2>/dev/null | awk '/release/{print $5" "$6}' | tr -d ',')"
+L4T_LINE="$( { awk -F'[ ,]+' '/R[0-9]+ \(release\)/{print $2" "$4}' /etc/nv_tegra_release 2>/dev/null | head -1; } || echo unknown)"
+CUDA_LINE="$( { "$NVCC_BIN" --version 2>/dev/null | awk '/release/{print $5" "$6}' | tr -d ','; } || echo unknown)"
 CUDNN_LINE="$(dpkg-query -W -f='${Version}\n' libcudnn9-cuda-12 2>/dev/null || echo unknown)"
-HW_LINE="$(tr -d '\0' < /proc/device-tree/model 2>/dev/null)"
+HW_LINE="$(tr -d '\0' < /proc/device-tree/model 2>/dev/null || echo unknown)"
 GIT_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
 GIT_DESC="$(git -C "$REPO_ROOT" describe --always --dirty 2>/dev/null || echo unknown)"
+GCC_LINE="$(g++ --version 2>/dev/null | head -1 || echo unknown)"
+CMAKE_LINE="$(cmake --version 2>/dev/null | head -1 || echo unknown)"
 BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 cat > "$STAGE_DIR/BUILD_INFO.txt" <<INFO
@@ -83,8 +88,8 @@ L4T: ${L4T_LINE}
 JetPack metapackage: ${JETPACK_LINE}
 CUDA: ${CUDA_LINE}
 cuDNN: ${CUDNN_LINE}
-Compiler: $(g++ --version | head -1)
-CMake: $(cmake --version | head -1)
+Compiler: ${GCC_LINE}
+CMake: ${CMAKE_LINE}
 Source commit: ${GIT_SHA}
 Source describe: ${GIT_DESC}
 Source: https://github.com/EdgeFirstAI/onnxruntime/tree/${GIT_SHA}
